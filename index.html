@@ -3569,7 +3569,7 @@ window.suuntoLogin = async function(){
   const subKey = document.getElementById('suunto-sub-key')?.value?.trim();
   if(subKey) localStorage.setItem('fl7_suunto_sub_key', subKey);
 
-  const redirectUri = 'https://sokutanhegel.github.io/fitlog';
+  const redirectUri = 'http://localhost';
   const state = 'fitlog_' + Math.random().toString(36).slice(2);
   localStorage.setItem('fl7_suunto_state', state);
 
@@ -3596,7 +3596,7 @@ async function handleSuuntoCallback(){
 
   const clientId = getSuuntoClientId() || '92f71a8d-af3b-4e3d-8261-c86cf8f0398d';
   const clientSecret = localStorage.getItem('fl7_suunto_secret')||'';
-  const redirectUri = 'https://sokutanhegel.github.io/fitlog';
+  const redirectUri = 'http://localhost';
 
   // Basic Auth: Base64(clientId:clientSecret)
   const basicAuth = btoa(clientId + ':' + clientSecret);
@@ -3611,7 +3611,7 @@ async function handleSuuntoCallback(){
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        redirect_uri: 'https://sokutanhegel.github.io/fitlog',
+        redirect_uri: 'http://localhost',
       }).toString()
     });
     const data = await res.json();
@@ -3638,7 +3638,7 @@ window.suuntoEnterCode = function(){
     +'<div class="fb mb12"><div style="font-size:15px;font-weight:700">🏔️ Suunto Auth Kodu</div>'
     +'<button class="btn btns" onclick="closeModal()">✕</button></div>'
     +'<div style="font-size:12px;color:var(--tx2);margin-bottom:10px">'
-    +'Suunto girişi yaptıktan sonra tarayıcı <b>https://sokutanhegel.github.io/fitlog/?code=XXXX</b> adresine gider. '
+    +'Suunto girişi yaptıktan sonra tarayıcı <b>http://localhost/?code=XXXX</b> adresine gider. '
     +'URL\'deki <b>code=</b> değerini buraya yapıştır:</div>'
     +'<input class="fi" id="suunto-code-input" placeholder="code değeri" style="width:100%;margin-bottom:10px"/>'
     +'<div style="font-size:11px;color:var(--tx3);margin-bottom:12px">Client Secret de gerekli:</div>'
@@ -3668,7 +3668,7 @@ window.suuntoExchangeCode = async function(){
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        redirect_uri: 'https://sokutanhegel.github.io/fitlog',
+        redirect_uri: 'http://localhost',
       }).toString()
     });
     const text = await res.text();
