@@ -2373,7 +2373,8 @@ function renderGoals(){
         <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
           <div style="font-size:12px;font-weight:600;color:${statusColor}">${statusText}</div>
           ${isPlan?`<button class="btn btns" style="font-size:10px" onclick="go('race')">Plana Git →</button>`:''}
-          ${entryId?`<button class="btn btns" style="font-size:10px;color:#c0392b" onclick="deleteRaceEntry('${entryId}')">Sil</button>`:''}
+          ${entryId?`<button class="btn btns" style="font-size:10px" onclick="showAddRaceModal('${entryId}')">Düzenle</button>`:''}`
+          +`${entryId?`<button class="btn btns" style="font-size:10px;color:#c0392b" onclick="deleteRaceEntry('${entryId}')">Sil</button>`:''}
         </div>
       </div>
       ${isPlan&&totalSess>0?`
