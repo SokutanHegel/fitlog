@@ -647,7 +647,11 @@ function analyzeGap(currentMins, goalMins){
 }
 
 function generateRacePlan(config){
-  const {raceDate, raceName, goalTime, currentLevel, daysPerWeek, best_hm, best_10k, best_5k} = config;
+  const {raceDate, raceName, raceType, goalTime, currentLevel, daysPerWeek,
+         best_hm, best_10k, best_5k,
+         sessionDuration, longRunDay,
+         squat1rm, squat1rmTarget, bench1rm, deadlift1rm, ohp1rm,
+         pullupMax, muscleupLevel, muscleupTarget} = config;
   const today = td();
   const totalDays = diffDays(today, raceDate);
   const totalWeeks = Math.min(16, Math.max(4, Math.floor(totalDays/7)));
@@ -682,7 +686,14 @@ function generateRacePlan(config){
     5: [0,1,3,4,6],     // Pzt, Sal, Per, Cum, Paz
   };
   const runDays = runDayPatterns[daysPerWeek] || runDayPatterns[3];
-  const longDayIdx = runDays[runDays.length-1]; // Son gün uzun koşu
+  // Kuvvet günleri: koşu günleri dışındaki günler (max 2)
+  const allDays = [0,1,2,3,4,5,6];
+  const strengthDays = allDays.filter(d=>!runDays.includes(d)).slice(0,2);
+  // Uzun koşu günü: kullanıcı tercihi (longRunDay) veya son koşu günü
+  const preferredLongDay = longRunDay !== undefined ? parseInt(longRunDay) : null;
+  const longDayIdx = preferredLongDay !== null && runDays.includes(preferredLongDay)
+    ? preferredLongDay
+    : runDays[runDays.length-1];
 
   const weeks = [];
   const planStart = wkStart(today);
@@ -770,7 +781,31 @@ function generateRacePlan(config){
         const dist = distMap[d] || 0;
         const pace = paces[type] || goalPace;
         const description = getSessionDesc(type, dist, pace, paces, w, totalWeeks);
-        days.push({date, type, dist, pace: minToPaceStr(pace), description, done: false});
+
+        // Sadece koşu: tek seans, S2 yok
+        let sessions = [{type, dist, pace: minToPaceStr(pace), description,
+          duration: estimateSessionDuration(type, dist)}];
+
+        days.push({date, type, dist, pace: minToPaceStr(pace), description, done: false, sessions});
+      } else if(!isTaperWeek && strengthDays.includes(d)){
+        // Kuvvet günü: S1 kuvvet + S2 metcon veya calisthenics
+        const strSession = getStrengthSession(w, totalWeeks, config);
+        // Haftada max 2 metcon — hafta içi metcon sayacı
+        const metconCount = days.filter(dy=>dy.sessions&&dy.sessions.some(s=>s.type==='metcon')).length;
+        const s2 = (config.sessionDuration||60)>=60
+          ? (metconCount<2 && w%2===1
+              ? getMetconSession(w, totalWeeks, config)
+              : getCalisthenicsSession(w, totalWeeks, config))
+          : null;
+        const strSessions = [{
+          type:'strength', dist:0, pace:null,
+          label: strSession.label,
+          description: strSession.description,
+          duration: Math.min((config.sessionDuration||60)-20, 50)
+        }];
+        if(s2) strSessions.push({...s2, isS2:true});
+        days.push({date, type:'strength', dist:0, pace:null,
+          description: strSession.description, done:false, sessions:strSessions});
       } else {
         days.push({date, type:"rest", dist:0, pace:null, description:"Dinlenme veya aktif toparlanma", done:false});
       }
@@ -802,12 +837,143 @@ function generateRacePlan(config){
     createdAt: today,
     weeks,
     // Performance data
-    perfData: {best_hm, best_10k, best_5k},
+    perfData: {
+      best_hm, best_10k, best_5k,
+      squat1rm, squat1rmTarget, bench1rm, deadlift1rm, ohp1rm,
+      pullupMax, muscleupLevel, muscleupTarget,
+      sessionDuration: sessionDuration||60,
+      longRunDay: longRunDay||6,
+    },
     currentCapacityMins,
     currentPacePKm: minToPaceStr(currentPace),
     gap,
     revisions: []
   };
+}
+
+function getMetconSession(weekNum, totalWeeks, config){
+  const phase = weekNum/totalWeeks;
+  // 30+ çeşitli metcon — WODwell & benchmark WOD kütüphanesi
+  // Max 20 dk, koşu günlerine eklenmez, haftada max 2
+  const metcons = [
+    // ── AMRAP ──────────────────────────────────────────
+    {label:'Cindy',duration:20,type:'metcon',
+      description:'AMRAP 20dk: 5 pull-up + 10 push-up + 15 air squat'},
+    {label:'Mini Cindy',duration:12,type:'metcon',
+      description:'AMRAP 10dk: 5 pull-up + 10 push-up + 15 air squat'},
+    {label:'KB AMRAP 12',duration:15,type:'metcon',
+      description:'AMRAP 12dk: 10 KB swing (24kg) + 8 goblet squat + 6 KB clean & press / kol'},
+    {label:'Dumbbell AMRAP',duration:14,type:'metcon',
+      description:'AMRAP 12dk: 10 DB thruster + 10 DB renegade row + 200m koşu'},
+    {label:'Burpee AMRAP',duration:12,type:'metcon',
+      description:'AMRAP 10dk: 8 burpee-pull-up + 12 KB swing + 16 sit-up'},
+    {label:'Ghetto Bell',duration:20,type:'metcon',
+      description:'AMRAP 20dk: 25 KB swing + 20 sit-up + 15 air squat + 10 push-up + 5 pull-up'},
+    {label:'Push & Pull',duration:14,type:'metcon',
+      description:'AMRAP 12dk: 10 ring row + 10 dumbbell push press + 10 box step-up / taraf'},
+    {label:'Lower Body Blitz',duration:15,type:'metcon',
+      description:'AMRAP 12dk: 12 goblet squat + 10 jump lunge + 8 single-leg RDL / taraf + 6 pistol squat (assisted)'},
+    {label:'Core & Carry',duration:14,type:'metcon',
+      description:'AMRAP 10dk: 30sn plank + 10 hollow rock + 8 V-up + 40m farmer carry'},
+    // ── EMOM ──────────────────────────────────────────
+    {label:'Power EMOM 16',duration:18,type:'metcon',
+      description:'EMOM 16dk (4 hareket dönüşümlü): 8 KB swing / 10 push-up / 8 goblet squat / 30sn rest'},
+    {label:'Strength EMOM',duration:18,type:'metcon',
+      description:'EMOM 18dk: dk 1→ 5 pull-up, dk 2→ 10 dumbbell hang clean, dk 3→ 15 sit-up'},
+    {label:'Sprint EMOM',duration:14,type:'metcon',
+      description:'EMOM 12dk: dk 1→ 200m sprint, dk 2→ 15 air squat + 10 push-up'},
+    {label:'Turkish EMOM',duration:16,type:'metcon',
+      description:'EMOM 15dk: 1 Turkish get-up / kol (ağır KB). Her dk taraf değiştir.'},
+    {label:'Deadlift EMOM',duration:16,type:'metcon',
+      description:'EMOM 12dk: 5 dumbbell deadlift (ağır) — her 4 dkte ağırlık artır'},
+    {label:'Jump EMOM',duration:14,type:'metcon',
+      description:'EMOM 12dk: dk 1→ 10 box jump + 5 burpee, dk 2→ 20 double-under + 10 mountain climber'},
+    // ── FOR TIME ──────────────────────────────────────
+    {label:'21-15-9 KB',duration:14,type:'metcon',
+      description:'For time (cap 15dk): 21-15-9 → KB swing (24kg) + push-up + goblet squat'},
+    {label:'Chipper Classic',duration:18,type:'metcon',
+      description:'For time (cap 18dk): 50 air squat + 40 sit-up + 30 push-up + 20 pull-up + 10 burpee'},
+    {label:'400m Chipper',duration:18,type:'metcon',
+      description:'3 tur for time (cap 18dk): 400m koşu + 10 push-up + 15 squat + 20 sit-up'},
+    {label:'King Kettlebell',duration:18,type:'metcon',
+      description:'5 tur for time: 15 KB swing + 10 lunge + 10 push-up + 15 sit-up + 10 KB sumo DL high pull'},
+    {label:'Death by Pull-up',duration:15,type:'metcon',
+      description:'For time (cap 15dk): 1-2-3-4-5-6-7-8-9-10 pull-up + (ters sıra) 10-9-8-7... push-up'},
+    {label:'Linda Light',duration:16,type:'metcon',
+      description:'For time: 10-9-8-7-6-5-4-3-2-1 → dumbbell deadlift + bench press + hang clean'},
+    // ── TABATA ────────────────────────────────────────
+    {label:'Tabata Total',duration:20,type:'metcon',
+      description:'Tabata 8 hareket (8×20sn/10sn): squat/push-up/sit-up/pull-up/KB swing/burpee/lunge/mountain climber'},
+    {label:'Tabata KB',duration:16,type:'metcon',
+      description:'Tabata 4 hareket (2 tur): KB swing / goblet squat / KB clean / KB press'},
+    {label:'Tabata Core',duration:12,type:'metcon',
+      description:'Tabata 4dk: plank / hollow hold / V-up / bicycle crunch — 2 tur'},
+    // ── HÍBRIT / ÖZEL ────────────────────────────────
+    {label:'Running Sting',duration:18,type:'metcon',
+      description:'4 tur: 200m sprint + 15 burpee + 20 air squat (dinlenmesiz)'},
+    {label:'Farmer & Fighter',duration:16,type:'metcon',
+      description:'5 tur: 50m farmer carry + 10 push-up + 10 dumbbell row / kol + 10 jump squat'},
+    {label:'Gymnastics WOD',duration:18,type:'metcon',
+      description:'AMRAP 15dk: 5 strict pull-up + 10 dip (ring/parallel) + 15 push-up + 20 air squat'},
+    {label:'Double KB',duration:16,type:'metcon',
+      description:'AMRAP 14dk: 10 double KB swing + 8 double KB clean + 6 double KB press + 4 goblet squat'},
+    {label:'Box & Bell',duration:16,type:'metcon',
+      description:'AMRAP 14dk: 10 box step-up + 10 KB swing + 10 push-up + 10 sit-up'},
+    {label:'Hybrid Grind',duration:18,type:'metcon',
+      description:'3 tur for time: 400m koşu + 15 KB swing + 10 pull-up + 15 push-up + 10 goblet squat'},
+    {label:'Core Blast',duration:14,type:'metcon',
+      description:'EMOM 12dk: dk 1→ 30sn L-sit + 10 toes-to-bar, dk 2→ 20 hollow rock + 10 V-up'},
+    {label:'Sprint & Strength',duration:18,type:'metcon',
+      description:'5 tur: 100m sprint + 8 dumbbell thruster + 8 ring row + 8 burpee'},
+    {label:'Metcon Medley',duration:20,type:'metcon',
+      description:'20dk AMRAP: 400m koşu + 15 KB swing + 12 push-up + 9 pull-up + 6 burpee'},
+  ];
+  // Hafta ve faza göre sıralı seç — tekrar oranını azalt
+  const idx = (weekNum * 3 + Math.floor(phase * 7)) % metcons.length;
+  return metcons[idx];
+}
+
+function estimateSessionDuration(type, dist){
+  if(type==='rest') return 0;
+  if(dist>0) return Math.round(dist*(type==='easy'?8:type==='tempo'?6:7)+10);
+  return type==='strength'?50:type==='calisthenics'?30:45;
+}
+
+function getCalisthenicsSession(weekNum, totalWeeks, config){
+  const mu=config.muscleupLevel||'none';
+  const pullup=parseInt(config.pullupMax||0);
+  const phase=weekNum/totalWeeks;
+  if(mu==='none'||pullup<5){
+    return {type:'calisthenics',label:'Temel Çekiş',duration:25,
+      description:'Bant pull-up 4×6, inverted row 3×10, scapular pull 3×12'};
+  } else if(mu==='kipping'){
+    return {type:'calisthenics',label:'Strict Geliştirme',duration:30,
+      description:'Strict pull-up 4×max, negative MU 3×3, ring support 3×20sn'};
+  } else {
+    const reps=phase<0.5?'2×3':'3×'+Math.min(5,Math.floor(phase*8));
+    return {type:'calisthenics',label:'Muscle-up Prog.',duration:30,
+      description:`Strict MU ${reps}, weighted pull-up 3×5, L-sit 3×15sn`};
+  }
+}
+
+function getStrengthSession(weekNum, totalWeeks, config){
+  const phase=weekNum/totalWeeks;
+  const sq=parseFloat(config.squat1rm)||0;
+  const bp=parseFloat(config.bench1rm)||0;
+  const dl=parseFloat(config.deadlift1rm)||0;
+  const ohp=parseFloat(config.ohp1rm)||0;
+  const pct=phase<0.3?0.65:phase<0.6?0.75:phase<0.85?0.85:0.70;
+  function w(kg){return kg>0?Math.round(kg*pct/2.5)*2.5+'kg':'ağırlık seç';}
+  const isLower=weekNum%2===0;
+  if(isLower){
+    return {label:'Alt Vücut Kuvvet',
+      description:`Back Squat 4×5 @${w(sq)} · RDL 3×8 @${w(dl*0.7)} · Bulgarian SS 3×8`,
+      cali:getCalisthenicsSession(weekNum,totalWeeks,config)};
+  } else {
+    return {label:'Üst Vücut Kuvvet',
+      description:`Bench Press 4×5 @${w(bp)} · OHP 3×6 @${w(ohp)} · Barbell Row 3×8 @${w(bp*0.7)}`,
+      cali:getCalisthenicsSession(weekNum,totalWeeks,config)};
+  }
 }
 
 function getSessionDesc(type, dist, pace, paces, weekNum, totalWeeks){
@@ -867,12 +1033,20 @@ let rpState = {step:0, data:{}};
 const rpSteps = [
   {
     id:"raceName", title:"Yarış adı nedir?", type:"text",
-    placeholder:"Örn: Borum Yarı Maratonu"
+    placeholder:"Örn: Bodrum Yarı Maratonu"
   },
   {
     id:"raceDate", title:"Yarış tarihi?", type:"date"
   },
-
+  {
+    id:"raceType", title:"Yarış mesafesi?", type:"options",
+    options:[
+      {v:"5k",l:"5 km",ic:"ti-bolt"},
+      {v:"10k",l:"10 km",ic:"ti-run"},
+      {v:"hm",l:"Yarı Maraton (21.1 km)",ic:"ti-road"},
+      {v:"marathon",l:"Maraton (42.2 km)",ic:"ti-trophy"},
+    ]
+  },
   {
     id:"best_hm", title:"En iyi yarı maraton (21 km) derecelerin?", type:"timeentry",
     dist:21.1, icon:"ti-road", color:"#9b7fe8",
@@ -901,14 +1075,79 @@ const rpSteps = [
     ]
   },
   {
-    id:"daysPerWeek", title:"Haftada kaç gün koşuya ayırabilirsin?", type:"options",
+    id:"daysPerWeek", title:"Haftada kaç gün antrenmana ayırabilirsin?", type:"options",
     options:[
-      {v:2,l:"2 gün",sub:"Minimal, diğer sporlarla",ic:"ti-calendar"},
-      {v:3,l:"3 gün",sub:"Önerilen başlangıç",ic:"ti-calendar"},
-      {v:4,l:"4 gün",sub:"İdeal yarı maraton",ic:"ti-calendar"},
-      {v:5,l:"5 gün",sub:"Yoğun program",ic:"ti-calendar"},
+      {v:3,l:"3 gün",sub:"Minimal — koşu ağırlıklı",ic:"ti-calendar"},
+      {v:4,l:"4 gün",sub:"Dengeli — koşu + güç",ic:"ti-calendar"},
+      {v:5,l:"5 gün",sub:"Yoğun — hybrid program",ic:"ti-calendar"},
+      {v:6,l:"6 gün",sub:"Tam program",ic:"ti-calendar"},
     ]
-  }
+  },
+  {
+    id:"sessionDuration", title:"Ortalama antrenman süren?", type:"options",
+    options:[
+      {v:45,l:"45 dakika",sub:"Kompakt, verimli",ic:"ti-clock"},
+      {v:60,l:"60 dakika",sub:"Standart seans",ic:"ti-clock"},
+      {v:90,l:"90 dakika",sub:"Detaylı antrenman",ic:"ti-clock"},
+      {v:120,l:"2 saat+",sub:"Tam program",ic:"ti-clock"},
+    ]
+  },
+  {
+    id:"longRunDay", title:"Uzun koşu için hangi gün müsaitsin?", type:"options",
+    options:[
+      {v:5,l:"Cumartesi",sub:"Hafta sonu sabahı",ic:"ti-sun"},
+      {v:6,l:"Pazar",sub:"Hafta sonu sabahı",ic:"ti-sun"},
+      {v:4,l:"Cuma",sub:"Hafta sonu öncesi",ic:"ti-calendar"},
+      {v:3,l:"Perşembe",sub:"Hafta ortası",ic:"ti-calendar"},
+    ]
+  },
+  {
+    id:"squat1rm", title:"Back Squat 1RM'in? (En ağır tek tekrar)", type:"text",
+    placeholder:"Örn: 80 (kg). Bilmiyorsan boş bırak.",
+    note:"Hedef: program seni buradan ilerletecek"
+  },
+  {
+    id:"squat1rmTarget", title:"Back Squat hedefin?", type:"text",
+    placeholder:"Örn: 100 (kg). Boş bırakabilirsin.",
+    note:"Program bu hedefe göre progressive yük planlar"
+  },
+  {
+    id:"bench1rm", title:"Bench Press 1RM'in?", type:"text",
+    placeholder:"Örn: 70 (kg). Bilmiyorsan boş bırak.",
+    note:""
+  },
+  {
+    id:"deadlift1rm", title:"Deadlift 1RM'in?", type:"text",
+    placeholder:"Örn: 100 (kg). Bilmiyorsan boş bırak.",
+    note:""
+  },
+  {
+    id:"ohp1rm", title:"Overhead Press 1RM'in?", type:"text",
+    placeholder:"Örn: 50 (kg). Bilmiyorsan boş bırak.",
+    note:""
+  },
+  {
+    id:"pullupMax", title:"Strict Pull-up maksimum tekrar sayın?", type:"text",
+    placeholder:"Örn: 8. Hiç yapamıyorsan 0 yaz.",
+    note:"Program bant destekten ilerleyerek hedef tekrara ulaşır"
+  },
+  {
+    id:"muscleupLevel", title:"Muscle-up seviyeni belirt:", type:"options",
+    options:[
+      {v:"none",l:"Henüz yok",sub:"Pull-up üzerinde çalışıyorum",ic:"ti-seedling"},
+      {v:"kipping",l:"Kipping yapıyorum",sub:"Strict çalışıyorum",ic:"ti-plant"},
+      {v:"strict",l:"Strict yapıyorum",sub:"Tekrar artırmak istiyorum",ic:"ti-trophy"},
+    ]
+  },
+  {
+    id:"muscleupTarget", title:"Muscle-up hedefin?", type:"options",
+    options:[
+      {v:"first",l:"İlk tekrarı yapmak",sub:"0 → 1",ic:"ti-target"},
+      {v:"3reps",l:"3 tekrar",sub:"Güç temeli",ic:"ti-bolt"},
+      {v:"5reps",l:"5 tekrar",sub:"İyi seviye",ic:"ti-flame"},
+      {v:"10reps",l:"10 tekrar",sub:"İleri seviye",ic:"ti-trophy"},
+    ]
+  },
 ];
 
 function renderRaceScreen(){
@@ -1139,6 +1378,7 @@ a0")}
                       <div class="run-dist">${day.dist}</div>
                       <div class="run-pace" style="color:${c}88">${day.pace}</div>
                       <div class="intensity-bar" style="background:${c}"></div>
+                      ${(day.sessions&&day.sessions.length>1)?`<div style="margin-top:3px;padding-top:3px;border-top:1px dashed ${c}33"><span style="font-size:9px;color:var(--tx3)">S1 ~${day.sessions[0]&&day.sessions[0].duration||'?'}dk</span></div><div style="font-size:9px;color:#6d3fbb;font-weight:500">+ S2: ${day.sessions[1]&&day.sessions[1].label||'Cali'} ~${day.sessions[1]&&day.sessions[1].duration||30}dk</div>`:''}
                       ${!isDone&&day.type!=="race"?`<div style="font-size:8px;color:#e8c54766;margin-top:1px"><i class="ti ti-watch"></i></div>`:""}
                     `:`<div style="font-size:9px;color:var(--tx3)"><i class="ti ti-moon" style="font-size:11px"></i></div>`}
                   </div>`;
